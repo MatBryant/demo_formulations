@@ -1,0 +1,18 @@
+Material Library – Quick Reference
+Class Hierarchy
+    -Material
+
+        Base class that contains the common properties of any material (id, name, density, etc.).
+
+    -FormulatedProduct
+
+        Concrete subclass of Material. Represents a finished product that is made from other materials.
+        Adds its own properties such as massAmount, massUnit, volAmount, and volUnit.
+
+    -Reagent
+
+        Concrete subclass of Material. Represents a raw material that can be used as an ingredient.
+
+    -Ingredient Type
+        type Ingredient = FormulatedProduct | Reagent;
+        The Ingredient type is a union that allows a variable to hold either a FormulatedProduct or a Reagent. Used to type components of Formulated Products
