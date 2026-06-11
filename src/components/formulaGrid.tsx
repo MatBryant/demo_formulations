@@ -21,6 +21,10 @@ import {
   TABLE_DEFAULT_UNITS,
   type TableDefaultUnit,
 } from "../util/tableDefaultUnits";
+import {
+  DEFAULT_DISPLAY_DECIMALS,
+  formatValue,
+} from "../util/displayDecimals";
 
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
@@ -134,7 +138,8 @@ function isDiluentChecked(
 }
 
 function formatDiluentCalculated(
-  value: FormulationCellValue | undefined | null
+  value: FormulationCellValue | undefined | null,
+  dp: number = DEFAULT_DISPLAY_DECIMALS
 ): string {
   if (
     !isDiluentCellValue(value) ||
@@ -144,7 +149,7 @@ function formatDiluentCalculated(
   ) {
     return "";
   }
-  return `${value.value} ${value.unit}`;
+  return `${formatValue(value.value, dp)} ${value.unit}`;
 }
 
 function isPercentCellValue(
@@ -169,7 +174,8 @@ function isAmount(value: FormulationCellValue | undefined | null): value is Amou
 }
 
 function formatPercentResolved(
-  value: FormulationCellValue | undefined | null
+  value: FormulationCellValue | undefined | null,
+  dp: number = DEFAULT_DISPLAY_DECIMALS
 ): string {
   if (
     !isPercentCellValue(value) ||
@@ -178,17 +184,20 @@ function formatPercentResolved(
   ) {
     return "";
   }
-  return `${value.resolvedValue} ${value.resolvedUnit}`;
+  return `${formatValue(value.resolvedValue, dp)} ${value.resolvedUnit}`;
 }
 
 function isZeroAmount(amount: Amount | undefined | null): boolean {
   return amount != null && Number(amount.value) === 0;
 }
 
-function formatAmount(value: FormulationCellValue | undefined | null): string {
+function formatAmount(
+  value: FormulationCellValue | undefined | null,
+  dp: number = DEFAULT_DISPLAY_DECIMALS
+): string {
   if (isEmptyRecipeCell(value)) return "";
   if (!isAmount(value) || isZeroAmount(value)) return "";
-  return `${value.value} ${value.unit}`;
+  return `${formatValue(value.value, dp)} ${value.unit}`;
 }
 
 function getRowDiluentFormulations(
@@ -316,13 +325,19 @@ interface IGridData {
   onReagentSelect?: (payload: ReagentSelectPayload) => void;
   onRoleChange?: (payload: RoleChangePayload) => void;
   defaultUnit?: TableDefaultUnit;
+  displayDecimals?: number;
 }
 
-function DiluentCheckboxRenderer(props: CustomCellRendererProps<Row, FormulationCellValue>) {
+function DiluentCheckboxRenderer(
+  props: CustomCellRendererProps<Row, FormulationCellValue> & {
+    displayDecimals?: number;
+  }
+) {
   const field = props.colDef?.field as FormulationKey | undefined;
   const disabled = field != null && isSelfReference(props.data, field);
   const checked = !disabled && isDiluentChecked(props.value);
-  const calculated = formatDiluentCalculated(props.value);
+  const dp = props.displayDecimals ?? DEFAULT_DISPLAY_DECIMALS;
+  const calculated = formatDiluentCalculated(props.value, dp);
 
   return (
     <div
@@ -356,11 +371,14 @@ function DiluentCheckboxRenderer(props: CustomCellRendererProps<Row, Formulation
 }
 
 function PercentCellRenderer(
-  props: CustomCellRendererProps<Row, FormulationCellValue>
+  props: CustomCellRendererProps<Row, FormulationCellValue> & {
+    displayDecimals?: number;
+  }
 ) {
   const value = props.value;
   if (!isPercentCellValue(value)) return null;
-  const resolved = formatPercentResolved(value);
+  const dp = props.displayDecimals ?? DEFAULT_DISPLAY_DECIMALS;
+  const resolved = formatPercentResolved(value, dp);
 
   return (
     <div
@@ -373,7 +391,7 @@ function PercentCellRenderer(
         height: "100%",
       }}
     >
-      <span>{`${value.value} ${value.unit}`}</span>
+      <span>{`${formatValue(value.value, dp)} ${value.unit}`}</span>
       {resolved && (
         <span style={{ fontSize: 13, color: "#4b5563", whiteSpace: "nowrap" }}>
           {resolved}
@@ -383,8 +401,13 @@ function PercentCellRenderer(
   );
 }
 
-function FormulationCellRenderer(props: CustomCellRendererProps<Row, FormulationCellValue>) {
+function FormulationCellRenderer(
+  props: CustomCellRendererProps<Row, FormulationCellValue> & {
+    displayDecimals?: number;
+  }
+) {
   const field = props.colDef?.field as FormulationKey | undefined;
+  const dp = props.displayDecimals ?? DEFAULT_DISPLAY_DECIMALS;
   if (field && isSelfReference(props.data, field)) {
     return <span style={{ color: "#9ca3af" }}>—</span>;
   }
@@ -394,7 +417,7 @@ function FormulationCellRenderer(props: CustomCellRendererProps<Row, Formulation
   if (isPercentCellValue(props.value)) {
     return <PercentCellRenderer {...props} />;
   }
-  return <span>{formatAmount(props.value)}</span>;
+  return <span>{formatAmount(props.value, dp)}</span>;
 }
 
 function editorFallbackUnit(
@@ -486,6 +509,7 @@ export default function SimpleGrid({
   onReagentSelect,
   onRoleChange,
   defaultUnit = DEFAULT_TABLE_UNIT,
+  displayDecimals = DEFAULT_DISPLAY_DECIMALS,
 }: IGridData) {
   const [extraRows, setExtraRows] = useState<Row[]>([]);
   const blankRowCounter = useRef(0);
@@ -676,6 +700,7 @@ export default function SimpleGrid({
       cellDataType: false,
 
       cellRenderer: FormulationCellRenderer,
+      cellRendererParams: { displayDecimals },
 
       cellEditor: AmountCellEditor,
       cellEditorParams: {
@@ -732,6 +757,7 @@ export default function SimpleGrid({
     premixIds,
     reagentIds,
     defaultUnit,
+    displayDecimals,
   ]);
 
   const defaultColDef = useMemo<ColDef<Row>>(

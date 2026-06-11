@@ -1,4 +1,9 @@
 import type unitConversionEngine from "../classes/UnitConversionEngine";
+import {
+  DEFAULT_DISPLAY_DECIMALS,
+  formatValue,
+  roundValue,
+} from "./displayDecimals";
 
 /** Absolute units — direct conversion of the canonical amount via UnitConversionEngine. */
 export type CompositionAbsoluteUnit =
@@ -119,10 +124,19 @@ export function isZeroDisplayValue(value: number | undefined | null): boolean {
 }
 
 export function formatCompositionDisplay(
-  amount: CompositionDisplayAmount | null | undefined
+  amount: CompositionDisplayAmount | null | undefined,
+  dp: number = DEFAULT_DISPLAY_DECIMALS
 ): string {
   if (!amount || isZeroDisplayValue(amount.value)) return "";
-  return `${amount.value} ${amount.unit}`;
+  return `${formatValue(amount.value, dp)} ${amount.unit}`;
+}
+
+function roundedDisplayAmount(
+  value: number,
+  unit: CompositionDisplayUnit,
+  dp: number
+): CompositionDisplayAmount {
+  return { value: roundValue(value, dp), unit };
 }
 
 /** Cross-dimensional conversions (e.g. mL → g) need ingredient metadata. */
@@ -245,16 +259,17 @@ export function convertCompositionForDisplay(
   displayUnit: CompositionDisplayUnit,
   ctx: FormulationCompositionContext,
   resolveMaterial: MaterialResolver,
-  unitConverter: unitConversionEngine
+  unitConverter: unitConversionEngine,
+  dp: number = DEFAULT_DISPLAY_DECIMALS
 ): CompositionDisplayAmount | null {
   if (displayUnit === "mass%") {
     const value = massPercent(item, ctx, resolveMaterial, unitConverter);
-    return value != null ? { value, unit: "mass%" } : null;
+    return value != null ? roundedDisplayAmount(value, "mass%", dp) : null;
   }
 
   if (displayUnit === "vol%") {
     const value = volPercent(item, ctx, resolveMaterial, unitConverter);
-    return value != null ? { value, unit: "vol%" } : null;
+    return value != null ? roundedDisplayAmount(value, "vol%", dp) : null;
   }
 
   if (displayUnit === "g/L") {
@@ -265,7 +280,7 @@ export function convertCompositionForDisplay(
       resolveMaterial,
       unitConverter
     );
-    return value != null ? { value, unit: "g/L" } : null;
+    return value != null ? roundedDisplayAmount(value, "g/L", dp) : null;
   }
 
   if (displayUnit === "g/mL") {
@@ -276,7 +291,7 @@ export function convertCompositionForDisplay(
       resolveMaterial,
       unitConverter
     );
-    return value != null ? { value, unit: "g/mL" } : null;
+    return value != null ? roundedDisplayAmount(value, "g/mL", dp) : null;
   }
 
   const converted = safeConversion(
@@ -288,7 +303,7 @@ export function convertCompositionForDisplay(
   );
 
   if (converted == null) return null;
-  return { value: converted, unit: displayUnit };
+  return roundedDisplayAmount(converted, displayUnit, dp);
 }
 
 /**
@@ -300,13 +315,15 @@ export function convertCompositionDisplayUnit(
   newDisplayUnit: CompositionDisplayUnit,
   ctx: FormulationCompositionContext,
   resolveMaterial: MaterialResolver,
-  unitConverter: unitConversionEngine
+  unitConverter: unitConversionEngine,
+  dp: number = DEFAULT_DISPLAY_DECIMALS
 ): CompositionDisplayAmount | null {
   return convertCompositionForDisplay(
     canonical,
     newDisplayUnit,
     ctx,
     resolveMaterial,
-    unitConverter
+    unitConverter,
+    dp
   );
 }

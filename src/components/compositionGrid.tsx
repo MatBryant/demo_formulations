@@ -28,6 +28,7 @@ import {
   DEFAULT_TABLE_UNIT,
   type TableDefaultUnit,
 } from "../util/tableDefaultUnits";
+import { DEFAULT_DISPLAY_DECIMALS } from "../util/displayDecimals";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
 
@@ -59,9 +60,12 @@ export type CompositionDisplayUnitChange = {
 };
 
 function CompositionCellRenderer(
-  props: CustomCellRendererProps<Row, CompositionCellValue>
+  props: CustomCellRendererProps<Row, CompositionCellValue> & {
+    displayDecimals?: number;
+  }
 ) {
-  return <span>{formatCompositionDisplay(props.value)}</span>;
+  const dp = props.displayDecimals ?? DEFAULT_DISPLAY_DECIMALS;
+  return <span>{formatCompositionDisplay(props.value, dp)}</span>;
 }
 
 function CompositionUnitCellEditor(
@@ -70,6 +74,7 @@ function CompositionUnitCellEditor(
     resolveMaterial?: MaterialResolver;
     unitConverter?: unitConversionEngine;
     defaultDisplayUnit?: TableDefaultUnit;
+    displayDecimals?: number;
   }
 ) {
   const canonical = props.value?.canonical;
@@ -103,7 +108,8 @@ function CompositionUnitCellEditor(
       unit,
       props.formulationContext,
       props.resolveMaterial,
-      props.unitConverter
+      props.unitConverter,
+      props.displayDecimals ?? DEFAULT_DISPLAY_DECIMALS
     );
 
     if (!converted) {
@@ -152,6 +158,7 @@ interface CompositionGridProps {
   warnings?: CompositionWarning[];
   onDisplayUnitChange?: (payload: CompositionDisplayUnitChange) => void;
   defaultDisplayUnit?: TableDefaultUnit;
+  displayDecimals?: number;
 }
 
 export default function CompositionGrid({
@@ -165,6 +172,7 @@ export default function CompositionGrid({
   warnings = [],
   onDisplayUnitChange,
   defaultDisplayUnit = DEFAULT_TABLE_UNIT,
+  displayDecimals = DEFAULT_DISPLAY_DECIMALS,
 }: CompositionGridProps) {
   const [rowData, setRowData] = useState<Row[]>(data);
 
@@ -229,12 +237,14 @@ export default function CompositionGrid({
         },
         cellDataType: false,
         cellRenderer: CompositionCellRenderer,
+        cellRendererParams: { displayDecimals },
         cellEditor: CompositionUnitCellEditor,
         cellEditorParams: {
           formulationContext,
           resolveMaterial,
           unitConverter,
           defaultDisplayUnit,
+          displayDecimals,
         },
         cellEditorPopup: true,
       };
@@ -249,6 +259,7 @@ export default function CompositionGrid({
     unitConverter,
     showPremixColumns,
     defaultDisplayUnit,
+    displayDecimals,
   ]);
 
   const defaultColDef = useMemo<ColDef<Row>>(

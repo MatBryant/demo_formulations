@@ -39,6 +39,13 @@ import {
   TABLE_DEFAULT_UNITS,
   type TableDefaultUnit,
 } from './util/tableDefaultUnits'
+import {
+  clampDisplayDecimals,
+  DEFAULT_DISPLAY_DECIMALS,
+  MAX_DISPLAY_DECIMALS,
+  MIN_DISPLAY_DECIMALS,
+  roundValue,
+} from './util/displayDecimals'
 import type { FormulationKind, IngredientRole } from '../types/ddcTypes'
 import type { FormulationTypeMap } from './util/formulationColumnStyles'
 import { nextFormulationId } from './util/formulationIds'
@@ -423,7 +430,6 @@ function cloneFormulationData(source: FormulationData, newId: string): Formulati
   //////////////////////////////////////////////////////
   /* Settings */
 
-  const decimals = 5
   const localCurrency = '$';
 
 
@@ -480,6 +486,10 @@ function App() {
   const [tableDefaultUnit, setTableDefaultUnit] =
     useState<TableDefaultUnit>(DEFAULT_TABLE_UNIT);
   const tableDefaultUnitRef = useRef(tableDefaultUnit);
+  const [displayDecimals, setDisplayDecimals] = useState(
+    DEFAULT_DISPLAY_DECIMALS
+  );
+  const displayDecimalsRef = useRef(displayDecimals);
   const [paramsData, setParamsData] = useState<MetadataRow []>([]);
   const [formulationsReg, setFormulationsReg] = useState<Record<string, FormulatedProduct>>({}); 
   const [formulationsDataPersist, setFormulationsDataPersist] = useState<FormulationData[]>([]);
@@ -491,7 +501,7 @@ function App() {
   const formulaRowOrderRef = useRef<string[]>([]);
   const formulaDataRef = useRef<Row[]>([]);
   const unitConverter = useMemo(
-    () => new unitConversionEngine(decimals, false),
+    () => new unitConversionEngine(DEFAULT_DISPLAY_DECIMALS, false),
     []
   );
 
@@ -613,12 +623,14 @@ function App() {
             const prefKey = compositionDisplayKey(f.id, comp.id);
             const displayUnit =
               displayUnits[prefKey] ?? tableDefaultUnitRef.current;
+            const dp = displayDecimalsRef.current;
             const displayed = convertCompositionForDisplay(
               { id: comp.id, amount: comp.amount, unit: comp.unit },
               displayUnit,
               ctx,
               resolveMaterial,
-              unitConverter
+              unitConverter,
+              dp
             );
             const canonical = { amount: comp.amount, unit: comp.unit };
 
@@ -633,7 +645,7 @@ function App() {
                     canonical,
                   }
                 : {
-                    value: comp.amount,
+                    value: roundValue(comp.amount, dp),
                     unit: defaultDisplayUnit(comp.unit),
                     canonical,
                   },
@@ -647,6 +659,17 @@ function App() {
     tableDefaultUnitRef.current = unit;
     setTableDefaultUnit(unit);
     setCompositionData(buildCompositionGridData());
+  }
+
+  function handleDisplayDecimalsChange(raw: number) {
+    const dp = clampDisplayDecimals(raw);
+    displayDecimalsRef.current = dp;
+    setDisplayDecimals(dp);
+    unitConverter.setDecimalPlaces(dp);
+    const registry = formulationsRegRef.current;
+    if (!registry || Object.keys(registry).length === 0) return;
+    formulationGraphRef.current?.ensureAllComputed();
+    updateTableData();
   }
 
   function handleCompositionDisplayUnitChange({
@@ -708,6 +731,7 @@ function App() {
 
   function combineFormulationParams(data: MetadataRow[][]): MetadataRow[] {
     const result: Record<string, MetadataRow> = {};
+    const dp = displayDecimalsRef.current;
 
     data.flat().forEach((item) => {
       const { parameter, ...formulations } = item;
@@ -723,7 +747,10 @@ function App() {
 
       // Merge F-000X keys
       Object.entries(formulations).forEach(([formKey, value]) => {
-        result[key][formKey] = value;
+        result[key][formKey] =
+          typeof value === "number" && Number.isFinite(value)
+            ? roundValue(value, dp)
+            : value;
       });
     });
 
@@ -740,6 +767,8 @@ function App() {
     resolvedUnit?: string;
     manualDiluentAmount?: boolean;
   }): FormulationCellValue | undefined {
+    const dp = displayDecimalsRef.current;
+
     if (form.role === "diluent") {
       const cell: DiluentCellValue = { diluent: true };
       // Auto diluent: display resolved* from calculateDiluent. Manual override uses recipe.amount.
@@ -750,7 +779,7 @@ function App() {
         ? form.unit
         : (form.resolvedUnit ?? form.unit);
       if (displayAmount != null) {
-        cell.value = displayAmount;
+        cell.value = roundValue(displayAmount, dp);
         cell.unit = displayUnit as Amount["unit"];
       }
       return cell;
@@ -760,11 +789,11 @@ function App() {
       if (form.amount == null) return undefined;
       const cell = {
         percent: true as const,
-        value: form.amount,
+        value: roundValue(form.amount, dp),
         unit: form.unit,
         ...(form.resolvedAmount != null && form.resolvedUnit
           ? {
-              resolvedValue: form.resolvedAmount,
+              resolvedValue: roundValue(form.resolvedAmount, dp),
               resolvedUnit: form.resolvedUnit,
             }
           : {}),
@@ -772,7 +801,10 @@ function App() {
       return cell;
     }
     if (form.amount == null) return undefined;
-    return { value: form.amount, unit: form.unit as Amount["unit"] };
+    return {
+      value: roundValue(form.amount, dp),
+      unit: form.unit as Amount["unit"],
+    };
   }
 
   function mapFormulaToInputRow(
@@ -1148,6 +1180,10 @@ function App() {
     tableDefaultUnitRef.current = tableDefaultUnit;
   }, [tableDefaultUnit]);
 
+  useEffect(() => {
+    displayDecimalsRef.current = displayDecimals;
+  }, [displayDecimals]);
+
 
 
   useEffect(() => {
@@ -1251,6 +1287,28 @@ function App() {
                 ))}
               </select>
             </label>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: "0.9em",
+              }}
+              title="Decimal places for displayed and calculated values"
+            >
+              Decimal places
+              <input
+                type="number"
+                min={MIN_DISPLAY_DECIMALS}
+                max={MAX_DISPLAY_DECIMALS}
+                step={1}
+                value={displayDecimals}
+                onChange={(e) =>
+                  handleDisplayDecimalsChange(Number(e.target.value))
+                }
+                style={{ width: 48 }}
+              />
+            </label>
           </div>
           <button
             type="button"
@@ -1265,6 +1323,7 @@ function App() {
           data={paramsData}
           formulationTypes={formulationTypes}
           showPremixColumns={showPremixColumns}
+          displayDecimals={displayDecimals}
           commit={propagateParamChanges}
           gridBinding={metadataBinding}
         />
@@ -1276,6 +1335,7 @@ function App() {
           formulationTypes={formulationTypes}
           showPremixColumns={showPremixColumns}
           defaultUnit={tableDefaultUnit}
+          displayDecimals={displayDecimals}
           gridBinding={formulaBinding}
           onIngredientChange={propagateIngredientChange}
           onReagentSelect={propagateReagentSelect}
@@ -1293,6 +1353,7 @@ function App() {
           gridBinding={compositionBinding}
           warnings={compositionWarnings}
           defaultDisplayUnit={tableDefaultUnit}
+          displayDecimals={displayDecimals}
           onDisplayUnitChange={handleCompositionDisplayUnitChange}
         />
       </div>

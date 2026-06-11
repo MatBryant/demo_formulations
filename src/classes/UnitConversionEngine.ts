@@ -278,6 +278,14 @@ export default class unitConversionEngine{
         return this.unitIndex![name.toLowerCase()];
     }
 
+    /** Update rounding precision for the engine and all loaded unit objects. */
+    setDecimalPlaces(dp: number): void {
+        this.dp = dp;
+        for (const key in this.units) {
+            this.units[key].dp = dp;
+        }
+    }
+
     /* find the path to convert the unit when no direct conversion exists */
     getPath(unit1Obj: unitObj, unit2Obj: unitObj): string[]{
         var unit1: unitObj = unit1Obj;

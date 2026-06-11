@@ -10,6 +10,10 @@ import {
   shouldHidePremixColumn,
   type FormulationTypeMap,
 } from "../util/formulationColumnStyles";
+import {
+  DEFAULT_DISPLAY_DECIMALS,
+  formatValue,
+} from "../util/displayDecimals";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
 
@@ -22,6 +26,7 @@ interface MetadataTableProps {
   data: MetadataRow[];
   formulationTypes?: FormulationTypeMap;
   showPremixColumns?: boolean;
+  displayDecimals?: number;
   commit: (rows: MetadataRow[]) => void;
   gridBinding?: AlignedGridBinding;
 }
@@ -30,6 +35,7 @@ export default function MetadataTable({
   data,
   formulationTypes = {},
   showPremixColumns = true,
+  displayDecimals = DEFAULT_DISPLAY_DECIMALS,
   commit,
   gridBinding,
 }: MetadataTableProps) {
@@ -72,6 +78,14 @@ export default function MetadataTable({
           params.data?.parameter !== "residualVolume",
         cellDataType: false,
 
+        valueFormatter: (p) => {
+          const v = p.value;
+          if (typeof v === "number" && Number.isFinite(v)) {
+            return formatValue(v, displayDecimals);
+          }
+          return v == null ? "" : String(v);
+        },
+
         valueSetter: (p) => {
           const field = p.colDef.field as FormulationKey | undefined;
           if (!field) return false;
@@ -82,7 +96,7 @@ export default function MetadataTable({
     });
 
     return [...base, ...formulationCols];
-  }, [formulationKeys, formulationTypes, showPremixColumns]);
+  }, [formulationKeys, formulationTypes, showPremixColumns, displayDecimals]);
 
   const defaultColDef = useMemo<ColDef<MetadataRow>>(
     () => ({
