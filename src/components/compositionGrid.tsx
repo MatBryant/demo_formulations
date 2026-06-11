@@ -24,6 +24,10 @@ import {
   type FormulationCompositionContext,
   type MaterialResolver,
 } from "../util/compositionViewConverter";
+import {
+  DEFAULT_TABLE_UNIT,
+  type TableDefaultUnit,
+} from "../util/tableDefaultUnits";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
 
@@ -65,11 +69,13 @@ function CompositionUnitCellEditor(
     formulationContext?: FormulationCompositionContext;
     resolveMaterial?: MaterialResolver;
     unitConverter?: unitConversionEngine;
+    defaultDisplayUnit?: TableDefaultUnit;
   }
 ) {
   const canonical = props.value?.canonical;
+  const fallbackUnit = props.defaultDisplayUnit ?? DEFAULT_TABLE_UNIT;
   const [unit, setUnit] = useState<CompositionDisplayUnit>(
-    () => props.value?.unit ?? "g"
+    () => props.value?.unit ?? fallbackUnit
   );
   const skipInitialConversion = useRef(true);
 
@@ -145,6 +151,7 @@ interface CompositionGridProps {
   gridBinding?: AlignedGridBinding;
   warnings?: CompositionWarning[];
   onDisplayUnitChange?: (payload: CompositionDisplayUnitChange) => void;
+  defaultDisplayUnit?: TableDefaultUnit;
 }
 
 export default function CompositionGrid({
@@ -157,6 +164,7 @@ export default function CompositionGrid({
   gridBinding,
   warnings = [],
   onDisplayUnitChange,
+  defaultDisplayUnit = DEFAULT_TABLE_UNIT,
 }: CompositionGridProps) {
   const [rowData, setRowData] = useState<Row[]>(data);
 
@@ -226,6 +234,7 @@ export default function CompositionGrid({
           formulationContext,
           resolveMaterial,
           unitConverter,
+          defaultDisplayUnit,
         },
         cellEditorPopup: true,
       };
@@ -239,6 +248,7 @@ export default function CompositionGrid({
     resolveMaterial,
     unitConverter,
     showPremixColumns,
+    defaultDisplayUnit,
   ]);
 
   const defaultColDef = useMemo<ColDef<Row>>(

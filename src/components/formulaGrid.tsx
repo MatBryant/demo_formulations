@@ -16,23 +16,18 @@ import {
   type FormulationTypeMap,
 } from "../util/formulationColumnStyles";
 import type { AlignedGridBinding } from "../hooks/useAlignedFormulationGrids";
+import {
+  DEFAULT_TABLE_UNIT,
+  TABLE_DEFAULT_UNITS,
+  type TableDefaultUnit,
+} from "../util/tableDefaultUnits";
 
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
-type Unit =
-  | "g"
-  | "kg"
-  | "mg"
-  | "mL"
-  | "L"
-  | "moles"
-  | "g/mL"
-  | "g/L"
-  | "mass%"
-  | "vol%";
+type Unit = TableDefaultUnit;
 export type Amount = { value: number; unit: Unit };
 /** Diluent presence in a formula; calculated amount is read-only display. */
 export type DiluentCellValue = {
@@ -42,14 +37,25 @@ export type DiluentCellValue = {
 };
 /** Ingredient is in the recipe but has no amount yet. */
 export type EmptyRecipeCell = { empty: true };
-/** mass%/vol% recipe entry; resolved* is read-only calculated display. */
+/** mass%/vol%/g/L/g/mL — editable value on the left, resolved mass read-only on the right. */
 export type PercentCellValue = {
   percent: true;
   value: number;
-  unit: "mass%" | "vol%";
+  unit: "mass%" | "vol%" | "g/L" | "g/mL";
   resolvedValue?: number;
   resolvedUnit?: string;
 };
+
+export function isSplitResolvedRecipeUnit(
+  unit: string
+): unit is PercentCellValue["unit"] {
+  return (
+    unit === "mass%" ||
+    unit === "vol%" ||
+    unit === "g/L" ||
+    unit === "g/mL"
+  );
+}
 export type FormulationCellValue =
   | Amount
   | DiluentCellValue
@@ -160,10 +166,6 @@ function isAmount(value: FormulationCellValue | undefined | null): value is Amou
     !isEmptyRecipeCell(value) &&
     !isPercentCellValue(value)
   );
-}
-
-function isPercentUnit(unit: string | undefined): unit is "mass%" | "vol%" {
-  return unit === "mass%" || unit === "vol%";
 }
 
 function formatPercentResolved(
@@ -313,6 +315,7 @@ interface IGridData {
   onIngredientChange?: (payload: IngredientChangePayload) => void;
   onReagentSelect?: (payload: ReagentSelectPayload) => void;
   onRoleChange?: (payload: RoleChangePayload) => void;
+  defaultUnit?: TableDefaultUnit;
 }
 
 function DiluentCheckboxRenderer(props: CustomCellRendererProps<Row, FormulationCellValue>) {
@@ -394,23 +397,26 @@ function FormulationCellRenderer(props: CustomCellRendererProps<Row, Formulation
   return <span>{formatAmount(props.value)}</span>;
 }
 
+function editorFallbackUnit(
+  value: FormulationCellValue | undefined | null,
+  row: Row | undefined,
+  defaultUnit?: Unit
+): Unit {
+  if (isPercentCellValue(value)) return value.unit;
+  if (isAmount(value) && value.unit) return value.unit;
+  // Default unit applies only to new user-added ingredient rows.
+  if (row?._userAdded) return defaultUnit ?? DEFAULT_TABLE_UNIT;
+  return DEFAULT_TABLE_UNIT;
+}
+
 // v35 React controlled cell editor
 function AmountCellEditor(
-  props: CustomCellEditorProps<Row, FormulationCellValue> & { units?: Unit[] }
+  props: CustomCellEditorProps<Row, FormulationCellValue> & {
+    units?: Unit[];
+    defaultUnit?: Unit;
+  }
 ) {
-  const units =
-    props.units ?? [
-      "g",
-      "kg",
-      "mg",
-      "mL",
-      "L",
-      "moles",
-      "g/mL",
-      "g/L",
-      "mass%",
-      "vol%",
-    ];
+  const units = props.units ?? [...TABLE_DEFAULT_UNITS];
 
   const [value, setValue] = useState<string>(() => {
     const v = props.value;
@@ -418,12 +424,9 @@ function AmountCellEditor(
     if (!v || !isAmount(v) || isZeroAmount(v)) return "";
     return String(v.value);
   });
-  const [unit, setUnit] = useState<Unit>(() => {
-    const v = props.value;
-    if (isPercentCellValue(v)) return v.unit;
-    if (isAmount(v) && v.unit) return v.unit;
-    return "g";
-  });
+  const [unit, setUnit] = useState<Unit>(() =>
+    editorFallbackUnit(props.value, props.data, props.defaultUnit)
+  );
 
   // When the editor mounts, ensure local state matches the provided value
   useEffect(() => {
@@ -434,7 +437,7 @@ function AmountCellEditor(
       return;
     }
     setValue(!v || !isAmount(v) || isZeroAmount(v) ? "" : String(v.value));
-    setUnit(isAmount(v) && v.unit ? v.unit : "g");
+    setUnit(editorFallbackUnit(v, props.data, props.defaultUnit));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -482,6 +485,7 @@ export default function SimpleGrid({
   onIngredientChange,
   onReagentSelect,
   onRoleChange,
+  defaultUnit = DEFAULT_TABLE_UNIT,
 }: IGridData) {
   const [extraRows, setExtraRows] = useState<Row[]>([]);
   const blankRowCounter = useRef(0);
@@ -675,18 +679,8 @@ export default function SimpleGrid({
 
       cellEditor: AmountCellEditor,
       cellEditorParams: {
-        units: [
-          "g",
-          "kg",
-          "mg",
-          "mL",
-          "L",
-          "moles",
-          "g/mL",
-          "g/L",
-          "mass%",
-          "vol%",
-        ],
+        units: [...TABLE_DEFAULT_UNITS],
+        defaultUnit,
       },
 
       valueSetter: (p) => {
@@ -708,7 +702,7 @@ export default function SimpleGrid({
         const amount = p.newValue as Amount | undefined | null;
         if (!amount || isZeroAmount(amount)) {
           p.data[field] = { empty: true };
-        } else if (isPercentUnit(amount.unit)) {
+        } else if (isSplitResolvedRecipeUnit(amount.unit)) {
           const existing = p.data[field];
           const resolved = isPercentCellValue(existing)
             ? {
@@ -731,7 +725,14 @@ export default function SimpleGrid({
     });
 
     return [...base, ...formulationCols];
-  }, [formulationKeys, formulationTypes, showPremixColumns, premixIds, reagentIds]);
+  }, [
+    formulationKeys,
+    formulationTypes,
+    showPremixColumns,
+    premixIds,
+    reagentIds,
+    defaultUnit,
+  ]);
 
   const defaultColDef = useMemo<ColDef<Row>>(
     () => ({

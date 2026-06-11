@@ -1,22 +1,27 @@
 import type unitConversionEngine from "../classes/UnitConversionEngine";
 
-/** Absolute units shown via UnitConversionEngine. */
+/** Absolute units — direct conversion of the canonical amount via UnitConversionEngine. */
 export type CompositionAbsoluteUnit =
   | "g"
   | "kg"
   | "mg"
   | "mL"
   | "L"
-  | "moles"
-  | "g/mL"
-  | "g/L";
+  | "moles";
 
-/** Percent modes derived from formulation totals — no unit converter path. */
+/** Percent modes derived from formulation batch totals. */
 export type CompositionPercentUnit = "mass%" | "vol%";
+
+/** Concentration modes: component mass ÷ batch volume (not a direct unit conversion). */
+export type CompositionConcentrationUnit = "g/L" | "g/mL";
+
+export type CompositionDerivedUnit =
+  | CompositionPercentUnit
+  | CompositionConcentrationUnit;
 
 export type CompositionDisplayUnit =
   | CompositionAbsoluteUnit
-  | CompositionPercentUnit;
+  | CompositionDerivedUnit;
 
 export const COMPOSITION_ABSOLUTE_UNITS: CompositionAbsoluteUnit[] = [
   "g",
@@ -25,8 +30,6 @@ export const COMPOSITION_ABSOLUTE_UNITS: CompositionAbsoluteUnit[] = [
   "mL",
   "L",
   "moles",
-  "g/mL",
-  "g/L",
 ];
 
 export const COMPOSITION_PERCENT_UNITS: CompositionPercentUnit[] = [
@@ -34,8 +37,14 @@ export const COMPOSITION_PERCENT_UNITS: CompositionPercentUnit[] = [
   "vol%",
 ];
 
+export const COMPOSITION_CONCENTRATION_UNITS: CompositionConcentrationUnit[] = [
+  "g/L",
+  "g/mL",
+];
+
 export const COMPOSITION_DISPLAY_UNITS: CompositionDisplayUnit[] = [
   ...COMPOSITION_ABSOLUTE_UNITS,
+  ...COMPOSITION_CONCENTRATION_UNITS,
   ...COMPOSITION_PERCENT_UNITS,
 ];
 
@@ -78,6 +87,18 @@ export function isPercentDisplayUnit(
   return unit === "mass%" || unit === "vol%";
 }
 
+export function isConcentrationDisplayUnit(
+  unit: CompositionDisplayUnit
+): unit is CompositionConcentrationUnit {
+  return unit === "g/L" || unit === "g/mL";
+}
+
+export function isDerivedDisplayUnit(
+  unit: CompositionDisplayUnit
+): unit is CompositionDerivedUnit {
+  return isPercentDisplayUnit(unit) || isConcentrationDisplayUnit(unit);
+}
+
 const CANONICAL_UNIT_ALIASES: Record<string, CompositionAbsoluteUnit> = {
   g: "g",
   kg: "kg",
@@ -85,8 +106,6 @@ const CANONICAL_UNIT_ALIASES: Record<string, CompositionAbsoluteUnit> = {
   ml: "mL",
   l: "L",
   moles: "moles",
-  "g/ml": "g/mL",
-  "g/l": "g/L",
 };
 
 /** Map a stored composition unit to a supported absolute display unit. */
@@ -106,6 +125,34 @@ export function formatCompositionDisplay(
   return `${amount.value} ${amount.unit}`;
 }
 
+/** Cross-dimensional conversions (e.g. mL → g) need ingredient metadata. */
+function conversionNeedsMaterial(
+  fromUnit: string,
+  toUnit: string,
+  unitConverter: unitConversionEngine
+): boolean {
+  const u1 = unitConverter.getUnit(fromUnit);
+  const u2 = unitConverter.getUnit(toUnit);
+  if (!u1 || !u2) return true;
+  return !(
+    u1.group.toLowerCase() === u2.group.toLowerCase() &&
+    u1.base.toLowerCase() === u2.base.toLowerCase()
+  );
+}
+
+function safeConversion(
+  fromUnit: string,
+  toUnit: string,
+  amount: number,
+  material: Record<string, unknown> | undefined,
+  unitConverter: unitConversionEngine
+): number | null {
+  if (conversionNeedsMaterial(fromUnit, toUnit, unitConverter) && !material) {
+    return null;
+  }
+  return unitConverter.conversion(fromUnit, toUnit, amount, material);
+}
+
 function massPercent(
   item: CompositionCanonicalItem,
   ctx: FormulationCompositionContext,
@@ -114,17 +161,19 @@ function massPercent(
 ): number | null {
   if (ctx.massAmount == null || !ctx.massUnit) return null;
 
-  const totalG = unitConverter.conversion(
+  const totalG = safeConversion(
     ctx.massUnit,
     "g",
     ctx.massAmount,
-    ctx.formulationMaterial
+    ctx.formulationMaterial,
+    unitConverter
   );
-  const componentG = unitConverter.conversion(
+  const componentG = safeConversion(
     item.unit,
     "g",
     item.amount,
-    resolveMaterial(item.id)
+    resolveMaterial(item.id),
+    unitConverter
   );
 
   if (totalG == null || componentG == null || totalG === 0) return null;
@@ -139,26 +188,57 @@ function volPercent(
 ): number | null {
   if (ctx.volAmount == null || !ctx.volUnit) return null;
 
-  const totalMl = unitConverter.conversion(
+  const totalMl = safeConversion(
     ctx.volUnit,
     "ml",
     ctx.volAmount,
-    ctx.formulationMaterial
+    ctx.formulationMaterial,
+    unitConverter
   );
-  const componentMl = unitConverter.conversion(
+  const componentMl = safeConversion(
     item.unit,
     "ml",
     item.amount,
-    resolveMaterial(item.id)
+    resolveMaterial(item.id),
+    unitConverter
   );
 
   if (totalMl == null || componentMl == null || totalMl === 0) return null;
   return (componentMl / totalMl) * 100;
 }
 
+/** Mass concentration relative to formulation batch volume (same basis as getComponentConc). */
+function massConcentration(
+  item: CompositionCanonicalItem,
+  volumeUnit: "L" | "mL",
+  ctx: FormulationCompositionContext,
+  resolveMaterial: MaterialResolver,
+  unitConverter: unitConversionEngine
+): number | null {
+  if (ctx.volAmount == null || !ctx.volUnit) return null;
+
+  const componentG = safeConversion(
+    item.unit,
+    "g",
+    item.amount,
+    resolveMaterial(item.id),
+    unitConverter
+  );
+  const totalVol = safeConversion(
+    ctx.volUnit,
+    volumeUnit,
+    ctx.volAmount,
+    ctx.formulationMaterial,
+    unitConverter
+  );
+
+  if (componentG == null || totalVol == null || totalVol === 0) return null;
+  return componentG / totalVol;
+}
+
 /**
  * Convert one composition row from its canonical amount/unit into a viewer display
- * amount. Percent modes use formulation totals; absolute modes use UnitConversionEngine.
+ * amount. Derived modes use formulation totals; absolute modes use UnitConversionEngine.
  */
 export function convertCompositionForDisplay(
   item: CompositionCanonicalItem,
@@ -177,11 +257,34 @@ export function convertCompositionForDisplay(
     return value != null ? { value, unit: "vol%" } : null;
   }
 
-  const converted = unitConverter.conversion(
+  if (displayUnit === "g/L") {
+    const value = massConcentration(
+      item,
+      "L",
+      ctx,
+      resolveMaterial,
+      unitConverter
+    );
+    return value != null ? { value, unit: "g/L" } : null;
+  }
+
+  if (displayUnit === "g/mL") {
+    const value = massConcentration(
+      item,
+      "mL",
+      ctx,
+      resolveMaterial,
+      unitConverter
+    );
+    return value != null ? { value, unit: "g/mL" } : null;
+  }
+
+  const converted = safeConversion(
     item.unit,
     displayUnit,
     item.amount,
-    resolveMaterial(item.id)
+    resolveMaterial(item.id),
+    unitConverter
   );
 
   if (converted == null) return null;

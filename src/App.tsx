@@ -13,14 +13,15 @@ import type {
 } from '../types/FormulatedProduct.interface'
 import type Reagent from './classes/Reagent'
 import type { FormulationData, FormulationDataPop }  from '../types/FormulationData.interface'
-import type {
-  Row,
-  Amount,
-  DiluentCellValue,
-  ReagentSelectPayload,
-  RoleChangePayload,
-  IngredientChangePayload,
-  FormulationCellValue,
+import {
+  isSplitResolvedRecipeUnit,
+  type Row,
+  type Amount,
+  type DiluentCellValue,
+  type ReagentSelectPayload,
+  type RoleChangePayload,
+  type IngredientChangePayload,
+  type FormulationCellValue,
 } from './components/formulaGrid'
 import type {
   Row as CompositionRow,
@@ -33,6 +34,11 @@ import {
   type CompositionDisplayUnit,
   type FormulationCompositionContext,
 } from './util/compositionViewConverter'
+import {
+  DEFAULT_TABLE_UNIT,
+  TABLE_DEFAULT_UNITS,
+  type TableDefaultUnit,
+} from './util/tableDefaultUnits'
 import type { FormulationKind, IngredientRole } from '../types/ddcTypes'
 import type { FormulationTypeMap } from './util/formulationColumnStyles'
 import { nextFormulationId } from './util/formulationIds'
@@ -353,9 +359,9 @@ function createDefaultPremixData(newId: string): FormulationData {
       hazards: [],
       status: "In Planning",
       mixture: true,
-      massAmount: 0,
+      massAmount: 100,
       massUnit: "g",
-      volAmount: 0,
+      volAmount: 100,
       volUnit: "mL",
     },
     recipe: {
@@ -382,9 +388,9 @@ function createDefaultFormulationData(newId: string): FormulationData {
       hazards: [],
       status: "In Planning",
       mixture: true,
-      massAmount: 0,
+      massAmount: 100,
       massUnit: "g",
-      volAmount: 0,
+      volAmount: 100,
       volUnit: "mL",
     },
     recipe: {
@@ -471,6 +477,9 @@ function App() {
     Record<string, CompositionDisplayUnit>
   >({});
   const compositionDisplayUnitsRef = useRef(compositionDisplayUnits);
+  const [tableDefaultUnit, setTableDefaultUnit] =
+    useState<TableDefaultUnit>(DEFAULT_TABLE_UNIT);
+  const tableDefaultUnitRef = useRef(tableDefaultUnit);
   const [paramsData, setParamsData] = useState<MetadataRow []>([]);
   const [formulationsReg, setFormulationsReg] = useState<Record<string, FormulatedProduct>>({}); 
   const [formulationsDataPersist, setFormulationsDataPersist] = useState<FormulationData[]>([]);
@@ -564,6 +573,11 @@ function App() {
     if (reagent) {
       return reagent as unknown as Record<string, unknown>;
     }
+    // Ref may lag one effect tick behind state on first load.
+    const fallback = reagents.find((r) => r.id === id);
+    if (fallback) {
+      return fallback as unknown as Record<string, unknown>;
+    }
     return undefined;
   }
 
@@ -598,7 +612,7 @@ function App() {
           return f.composition.map((comp) => {
             const prefKey = compositionDisplayKey(f.id, comp.id);
             const displayUnit =
-              displayUnits[prefKey] ?? defaultDisplayUnit(comp.unit);
+              displayUnits[prefKey] ?? tableDefaultUnitRef.current;
             const displayed = convertCompositionForDisplay(
               { id: comp.id, amount: comp.amount, unit: comp.unit },
               displayUnit,
@@ -627,6 +641,12 @@ function App() {
           });
         })
     );
+  }
+
+  function handleTableDefaultUnitChange(unit: TableDefaultUnit) {
+    tableDefaultUnitRef.current = unit;
+    setTableDefaultUnit(unit);
+    setCompositionData(buildCompositionGridData());
   }
 
   function handleCompositionDisplayUnitChange({
@@ -735,13 +755,13 @@ function App() {
       }
       return cell;
     }
-    // mass%/vol%: editable % in the cell; resolved absolute qty shown read-only beside it.
-    if (form.unit === "mass%" || form.unit === "vol%") {
+    // mass%/vol%/g/L/g/mL: editable input left; resolved mass read-only on the right.
+    if (isSplitResolvedRecipeUnit(form.unit)) {
       if (form.amount == null) return undefined;
       const cell = {
         percent: true as const,
         value: form.amount,
-        unit: form.unit as "mass%" | "vol%",
+        unit: form.unit,
         ...(form.resolvedAmount != null && form.resolvedUnit
           ? {
               resolvedValue: form.resolvedAmount,
@@ -1099,41 +1119,52 @@ function App() {
 
   useEffect(() => {
     formulationsRegRef.current = formulationsReg;
-    if (formulationsReg){
-      /* build the formulations graph to track relationships at runtime */
-      const formGraph = new FormulationGraph({formulations: Object.values(formulationsReg), reagents:reagents} )
-      formGraph.rebuildUsedInIndex();
-      formGraph.ensureAllComputed();
-      formulationGraphRef.current = formGraph;
-      updateTableData();
-    }
-    if (formulationsReg){
-      Object.keys(formulationsReg!).forEach(element => {
-        console.log(formulationsReg![element].toJSON())
-      });
-    }
-  }, [formulationsReg]);
-
-    useEffect(() => {
     reagentsRegRef.current = reagentsReg;
-  }, [reagentsReg]);
+
+    if (
+      !formulationsReg ||
+      !reagentsReg ||
+      Object.keys(formulationsReg).length === 0
+    ) {
+      return;
+    }
+
+    /* build the formulations graph to track relationships at runtime */
+    const formGraph = new FormulationGraph({
+      formulations: Object.values(formulationsReg),
+      reagents,
+    });
+    formGraph.rebuildUsedInIndex();
+    formGraph.ensureAllComputed();
+    formulationGraphRef.current = formGraph;
+    updateTableData();
+  }, [formulationsReg, reagentsReg]);
 
   useEffect(() => {
     compositionDisplayUnitsRef.current = compositionDisplayUnits;
   }, [compositionDisplayUnits]);
+
+  useEffect(() => {
+    tableDefaultUnitRef.current = tableDefaultUnit;
+  }, [tableDefaultUnit]);
 
 
 
   useEffect(() => {
     unitConverter.init().then(_=> {
       var reagentRegistry = buildReagentRegistry(reagents);
-      setReagentsReg(reagentRegistry)
+      reagentsRegRef.current = reagentRegistry;
+      setReagentsReg(reagentRegistry);
       const persist = cloneFormulationsDataBase();
       setFormulationsDataPersist(persist);
       var formulationDataRegistry = buildFormulationDataRegistry(persist);
-      var formulationRegistry = buildFormulationShellRegistry(formulationDataRegistry, reagentRegistry, unitConverter);
+      var formulationRegistry = buildFormulationShellRegistry(
+        formulationDataRegistry,
+        reagentRegistry,
+        unitConverter
+      );
+      formulationsRegRef.current = formulationRegistry;
       setFormulationsReg(formulationRegistry);
-      console.log(unitConverter)
     });
 
     
@@ -1197,6 +1228,29 @@ function App() {
             >
               {showPremixColumns ? "Hide pre-mix columns" : "Show pre-mix columns"}
             </button>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: "0.9em",
+              }}
+              title="Composition table display default; also pre-selects unit on new formula ingredient rows"
+            >
+              Composition default unit
+              <select
+                value={tableDefaultUnit}
+                onChange={(e) =>
+                  handleTableDefaultUnitChange(e.target.value as TableDefaultUnit)
+                }
+              >
+                {TABLE_DEFAULT_UNITS.map((unit) => (
+                  <option key={unit} value={unit}>
+                    {unit}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
           <button
             type="button"
@@ -1221,6 +1275,7 @@ function App() {
           premixes={premixes}
           formulationTypes={formulationTypes}
           showPremixColumns={showPremixColumns}
+          defaultUnit={tableDefaultUnit}
           gridBinding={formulaBinding}
           onIngredientChange={propagateIngredientChange}
           onReagentSelect={propagateReagentSelect}
@@ -1237,6 +1292,7 @@ function App() {
           showPremixColumns={showPremixColumns}
           gridBinding={compositionBinding}
           warnings={compositionWarnings}
+          defaultDisplayUnit={tableDefaultUnit}
           onDisplayUnitChange={handleCompositionDisplayUnitChange}
         />
       </div>

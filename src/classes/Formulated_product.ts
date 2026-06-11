@@ -147,10 +147,10 @@ export class FormulatedProduct extends Material<"formulatedProduct"> implements 
     for (const comp of this.recipe.formula) {
       if (!comp) continue;
       //TODO
-      if(['Conc w/v', 'conc'].includes(this.unitConverter.getUnit(comp.unit)?.group ?? '')){
-        console.log('calculating concentration');
-      };
-      if (comp.unit === "mass%" || comp.unit === "vol%") {
+      if(['Conc w/v'].includes(this.unitConverter.getUnit(comp.unit)?.group ?? '')){
+        this.calculateConcentration(comp, formulationGraph);
+      }
+      else if (comp.unit === "mass%" || comp.unit === "vol%") {
         console.log("calculating percentage", comp);
         this.calculatePercentage(comp, formulationGraph);
       } else if (comp.amount != null && comp.unit) {
@@ -781,6 +781,56 @@ export class FormulatedProduct extends Material<"formulatedProduct"> implements 
       }
       return unitAggregate.reduce((s, a) => s + a, 0);
   }
+  /** Calculate the amount of diluent present */
+  calculateConcentration(component: IFormulatedProductFormulaItem, formulationGraph: Resolver){
+    if (component.amount == null || this.volAmount == null || !this.volUnit) {
+      return;
+    }
+
+    const gpMl = this.unitConverter.conversion(
+      component.unit,
+      "g/mL",
+      component.amount,
+      formulationGraph.resolve(component.id) as Ingredient
+    );
+    if (gpMl == null) {
+      console.log(
+        `Concentration for ${component.id} cannot be calculated - check input parameters`
+      );
+      return;
+    }
+
+    const totalMl = this.unitConverter.conversion(
+      this.volUnit,
+      "mL",
+      this.volAmount,
+      this
+    );
+    if (totalMl == null) {
+      console.log(
+        `Concentration for ${component.id} cannot be calculated - batch volume unit invalid`
+      );
+      return;
+    }
+
+    const gramAmount = gpMl * totalMl;
+    const resolvedMass = this.unitConverter.conversion(
+      "g",
+      this.massUnit ?? "g",
+      gramAmount,
+      formulationGraph.resolve(component.id) as Ingredient
+    );
+    if (resolvedMass == null) {
+      console.log(
+        `Concentration for ${component.id} cannot be calculated - mass unit conversion failed`
+      );
+      return;
+    }
+
+    component.resolvedAmount = resolvedMass;
+    component.resolvedUnit = this.massUnit ?? "g";
+  }
+
   /** Calculate the amount of diluent present */
   calculatePercentage(component: IFormulatedProductFormulaItem, formulationGraph: Resolver){
     /* We back calculate quantity from % */

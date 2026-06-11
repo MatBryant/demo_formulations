@@ -351,7 +351,7 @@ export default class unitConversionEngine{
             if (conversions.meta.length > 0){
                 /* Additional info needed */
                 if (!material){
-                    alert(`Select material to convert ${u1} to ${u2}`)
+                    this.log.push(`Material required to convert ${u1} to ${u2}`);
                     return null;
                 }
                 this.log.push(`       Metadata values required to convert ${u1} to ${u2}`);
